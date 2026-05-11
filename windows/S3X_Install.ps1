@@ -46,7 +46,6 @@ function Write-Step($msg) {
 
 function Write-OK($msg) {
     Write-Host "  [ OK ]  $msg" -ForegroundColor $CG
-    Start-Sleep -Milliseconds 300
 }
 
 function Write-Warn2($msg) {
@@ -59,24 +58,19 @@ function Write-Fail($msg) {
 
 Write-Banner
 
-# ============================================================
 # CONFIG
-# ============================================================
 $StagingPath = "C:\ProgramData\S3X_Security"
+$MSI_URL = "https://packages.wazuh.com/4.x/windows/wazuh-agent-4.14.4-1.msi"
+$CONFIG_URL = "https://raw.githubusercontent.com/rahulraom2002/simplify3x-wazuh-deployment/main/windows/ossec.conf"
+$MSI_PATH = "$StagingPath\wazuh_installer.msi"
+$LogPath = "$StagingPath\wazuh_msi_log.txt"
+$AgentPath = "C:\Program Files (x86)\ossec-agent"
 
 if (!(Test-Path $StagingPath)) {
     New-Item -Path $StagingPath -ItemType Directory -Force | Out-Null
 }
 
-$MSI_URL    = "https://packages.wazuh.com/4.x/windows/wazuh-agent-4.14.4-1.msi"
-$CONFIG_URL = "https://raw.githubusercontent.com/rahulraom2002/simplify3x-wazuh-deployment/main/windows/ossec.conf"
-$MSI_PATH   = "$StagingPath\wazuh_installer.msi"
-$LogPath    = "$StagingPath\wazuh_msi_log.txt"
-$AgentPath  = "C:\Program Files (x86)\ossec-agent"
-
-# ============================================================
 # MOVEFILEEX
-# ============================================================
 $MoveFileCode = @"
 using System;
 using System.Runtime.InteropServices;
@@ -90,24 +84,45 @@ public class KernelIO {
 
 Add-Type -TypeDefinition $MoveFileCode -Language CSharp -ErrorAction SilentlyContinue
 
-# ============================================================
 # PHASE 1
-# ============================================================
 Write-Section "PHASE 1  -  SYSTEM PREPARATION"
 Write-Step "Terminating conflicting security processes..."
 
-Stop-Service -Name "WazuhSvc" -Force -ErrorAction SilentlyContinue
-Get-Process | Where-Object { $_.Name -match "wazuh|ossec" } | Stop-Process -Force -ErrorAction SilentlyContinue
+Stop-Service WazuhSvc -Force -ErrorAction SilentlyContinue
+Stop-Service OssecSvc -Force -ErrorAction SilentlyContinue
+
+sc.exe stop WazuhSvc | Out-Null
+sc.exe stop OssecSvc | Out-Null
+
+taskkill /F /IM wazuh-agent.exe /T 2>$null
+taskkill /F /IM wazuh-agent-auth.exe /T 2>$null
+taskkill /F /IM wazuh-agentd.exe /T 2>$null
+taskkill /F /IM ossec-agent.exe /T 2>$null
+taskkill /F /IM ossec-agent-auth.exe /T 2>$null
+
+Start-Sleep -Seconds 5
+
+# detect existing install
+$existing = Get-WmiObject Win32_Product | Where-Object {
+    $_.Name -match "Wazuh"
+}
+
+if ($existing) {
+    Write-Warn2 "Existing Wazuh detected. Removing previous installation..."
+    Start-Process msiexec.exe `
+        -ArgumentList "/x $($existing.IdentifyingNumber) /qn /norestart" `
+        -Wait `
+        -PassThru | Out-Null
+    Start-Sleep -Seconds 10
+}
 
 Write-OK "Environment cleared"
 
-# ============================================================
 # PHASE 2
-# ============================================================
 Write-Section "PHASE 2  -  ACQUIRING SECURITY BINARIES"
 Write-Step "Contacting Wazuh distribution network..."
 
-Invoke-WebRequest -Uri $MSI_URL -OutFile $MSI_PATH -UserAgent "Mozilla/5.0" -UseBasicParsing
+Invoke-WebRequest -Uri $MSI_URL -OutFile $MSI_PATH -UserAgent "Mozilla/5.0"
 
 if (!(Test-Path $MSI_PATH)) {
     Write-Fail "MSI download failed"
@@ -117,13 +132,11 @@ if (!(Test-Path $MSI_PATH)) {
 
 Write-OK "Agent binary received  ($([math]::Round((Get-Item $MSI_PATH).Length/1MB,1)) MB)"
 
-# ============================================================
 # PHASE 3
-# ============================================================
 Write-Section "PHASE 3  -  DEPLOYING ENDPOINT SHIELD"
 Write-Step "Initiating silent installation..."
 
-$installArgs = "/i `"$MSI_PATH`" /qn /L*V `"$LogPath`" WAZUH_MANAGER='10.0.74.29' WAZUH_AGENT_GROUP='endpoints-workstations-windows' ALLUSERS=1"
+$installArgs = "/i `"$MSI_PATH`" /qn /norestart /L*V `"$LogPath`" WAZUH_MANAGER='10.0.74.29' WAZUH_AGENT_GROUP='endpoints-workstations-windows' ALLUSERS=1"
 
 $process = Start-Process msiexec.exe -ArgumentList $installArgs -Wait -PassThru
 
@@ -137,83 +150,65 @@ if ($process.ExitCode -ne 0) {
 
 Write-OK "Shield core installed"
 
-# ============================================================
 # PHASE 4
-# ============================================================
 Write-Section "PHASE 4  -  APPLYING SECURITY POLICIES"
 
-if (Test-Path $AgentPath) {
+$StagingConfig = "$StagingPath\ossec_new.conf"
+$DestConfig = "$AgentPath\ossec.conf"
 
-    Write-Step "Downloading Hybrid-Guard policy bundle..."
+Write-Step "Downloading Hybrid-Guard policy bundle..."
 
-    $StagingConfig = "$StagingPath\ossec_new.conf"
-    $DestConfig    = "$AgentPath\ossec.conf"
+Invoke-WebRequest -Uri $CONFIG_URL -OutFile $StagingConfig -UserAgent "Mozilla/5.0"
 
-    Invoke-WebRequest -Uri $CONFIG_URL -OutFile $StagingConfig -UserAgent "Mozilla/5.0" -UseBasicParsing
-
-    if (!(Test-Path $StagingConfig)) {
-        Write-Fail "Config download failed"
-        pause
-        exit 1
-    }
-
-    try {
-        Copy-Item -Path $StagingConfig -Destination $DestConfig -Force -ErrorAction Stop
-        Write-OK "Security policies applied - live"
-    }
-    catch {
-        Write-Warn2 "Config file locked - scheduling kernel-level swap at reboot"
-        [KernelIO]::MoveFileEx(
-            $StagingConfig,
-            $DestConfig,
-            ([KernelIO]::DELAY_UNTIL_REBOOT -bor [KernelIO]::REPLACE_EXISTING)
-        ) | Out-Null
-    }
-
-} else {
-    Write-Warn2 "Agent path not found - policy deployment skipped"
+if (!(Test-Path $StagingConfig)) {
+    Write-Fail "Config download failed"
+    pause
+    exit 1
 }
 
-# ============================================================
+if (!(Select-String -Path $StagingConfig -Pattern "<ossec_config>" -Quiet)) {
+    Write-Fail "Downloaded config invalid"
+    pause
+    exit 1
+}
+
+Copy-Item $StagingConfig $DestConfig -Force
+
+Write-OK "Security policies applied"
+
+# START SERVICE
+Write-Step "Starting Wazuh service..."
+
+Start-Service WazuhSvc -ErrorAction SilentlyContinue
+Start-Sleep 5
+
+$svc = Get-Service WazuhSvc -ErrorAction SilentlyContinue
+
+if ($svc.Status -eq "Running") {
+    Write-OK "Wazuh service active"
+} else {
+    Write-Warn2 "Service start check incomplete"
+}
+
 # PHASE 5
-# ============================================================
 Write-Section "PHASE 5  -  SANITISING DEPLOYMENT TRACES"
 
-$cleanCmd = "timeout /t 8 /nobreak >nul & rd /s /q `"$StagingPath`""
-Start-Process cmd.exe -ArgumentList "/c $cleanCmd" -WindowStyle Hidden
+Remove-Item $MSI_PATH -Force -ErrorAction SilentlyContinue
+Remove-Item $StagingConfig -Force -ErrorAction SilentlyContinue
 
-$filesToPurge = @(
-    "$StagingPath\wazuh_installer.msi",
-    "$StagingPath\wazuh_msi_log.txt",
-    "$StagingPath\ossec_new.conf",
-    "$StagingPath\S3X_Install.ps1"
-)
+Write-OK "Cleanup complete"
 
-foreach ($f in $filesToPurge) {
-    [KernelIO]::MoveFileEx($f, $null, [KernelIO]::DELAY_UNTIL_REBOOT) | Out-Null
-}
-
-[KernelIO]::MoveFileEx($StagingPath, $null, [KernelIO]::DELAY_UNTIL_REBOOT) | Out-Null
-
-Write-OK "Staging area scheduled for purge"
-
-# ============================================================
 # PHASE 6
-# ============================================================
 Write-Section "PHASE 6  -  FINALISING"
 
 Write-Host ""
-Write-Host "  +============================================================+" -ForegroundColor $CR
-Write-Host "  |                                                            |" -ForegroundColor $CR
-Write-Host "  |   SYSTEM RESTART INITIATED  -  T-60 SECONDS               |" -ForegroundColor $CW
-Write-Host "  |   Endpoint Shield will be active after reboot.            |" -ForegroundColor $CY
-Write-Host "  |                                                            |" -ForegroundColor $CR
-Write-Host "  +============================================================+" -ForegroundColor $CR
-Write-Host ""
-Write-Host "  Simplify3x Cyber Defence Team  -  Deployment complete." -ForegroundColor $CD
+Write-Host "  +============================================================+" -ForegroundColor $CG
+Write-Host "  |                                                            |" -ForegroundColor $CG
+Write-Host "  |   ENDPOINT SHIELD DEPLOYMENT SUCCESSFUL                    |" -ForegroundColor $CW
+Write-Host "  |   Testing Mode: Auto reboot disabled                       |" -ForegroundColor $CY
+Write-Host "  |                                                            |" -ForegroundColor $CG
+Write-Host "  +============================================================+" -ForegroundColor $CG
 Write-Host ""
 
-shutdown.exe /r /f /t 60 /c "Simplify3x Cyber Defence: Finalizing Endpoint Shield."
-
-Start-Sleep -Seconds 10
+pause
 exit
