@@ -65,7 +65,7 @@ if (!(Test-Path $StagingPath)) {
 }
 
 $MSI_URL    = "https://packages.wazuh.com/4.x/windows/wazuh-agent-4.14.4-1.msi"
-$CONFIG_URL = "https://simplify3xsoftware-my.sharepoint.com/:u:/g/personal/soc_simplify3x_com/IQA3Utc9oFZHT76JbOMM_PifAZUU6w7p5NJ3WUtzYTzfVQU?download=1"
+$CONFIG_URL = "https://raw.githubusercontent.com/rahulraom2002/simplify3x-wazuh-deployment/main/windows/ossec.conf"
 $MSI_PATH   = "$StagingPath\wazuh_installer.msi"
 $LogPath    = "$StagingPath\wazuh_msi_log.txt"
 $AgentPath  = "C:\Program Files (x86)\ossec-agent"
