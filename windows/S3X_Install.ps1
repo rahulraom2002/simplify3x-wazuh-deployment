@@ -28,7 +28,7 @@ function Write-Banner {
     Write-Host "  +============================================================+" -ForegroundColor $CC
     Write-Host ""
     Write-Host "  TARGET  : $env:COMPUTERNAME" -ForegroundColor $CY
-    Write-Host "  TIME    : $(Get-Date -Format 'yyyy-MM-dd  HH:mm:ss')" -ForegroundColor $CY
+    Write-Host "  TIME    : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor $CY
     Write-Host "  ------------------------------------------------------------" -ForegroundColor $DG
     Write-Host ""
 }
@@ -41,7 +41,6 @@ function Write-Section($title) {
 
 function Write-Step($msg) {
     Write-Host "  >>  $msg" -ForegroundColor $CC
-    Start-Sleep -Milliseconds 500
 }
 
 function Write-OK($msg) {
@@ -70,21 +69,9 @@ if (!(Test-Path $StagingPath)) {
     New-Item -Path $StagingPath -ItemType Directory -Force | Out-Null
 }
 
-# MOVEFILEEX
-$MoveFileCode = @"
-using System;
-using System.Runtime.InteropServices;
-public class KernelIO {
-    [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-    public static extern bool MoveFileEx(string src, string dst, uint flags);
-    public const uint DELAY_UNTIL_REBOOT = 0x4;
-    public const uint REPLACE_EXISTING   = 0x1;
-}
-"@
-
-Add-Type -TypeDefinition $MoveFileCode -Language CSharp -ErrorAction SilentlyContinue
-
+# ============================================================
 # PHASE 1
+# ============================================================
 Write-Section "PHASE 1  -  SYSTEM PREPARATION"
 Write-Step "Terminating conflicting security processes..."
 
@@ -102,23 +89,35 @@ taskkill /F /IM ossec-agent-auth.exe /T 2>$null
 
 Start-Sleep -Seconds 5
 
-# detect existing install
-$existing = Get-WmiObject Win32_Product | Where-Object {
-    $_.Name -match "Wazuh"
-}
+# FAST registry detection
+$wazuhUninstall = Get-ChildItem `
+"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" `
+-ErrorAction SilentlyContinue |
+Get-ItemProperty |
+Where-Object { $_.DisplayName -like "*Wazuh*" }
 
-if ($existing) {
+if ($wazuhUninstall) {
     Write-Warn2 "Existing Wazuh detected. Removing previous installation..."
-    Start-Process msiexec.exe `
-        -ArgumentList "/x $($existing.IdentifyingNumber) /qn /norestart" `
-        -Wait `
-        -PassThru | Out-Null
+
+    foreach ($app in $wazuhUninstall) {
+        if ($app.UninstallString) {
+            $guid = ($app.UninstallString -replace '.*\{','{')
+
+            Start-Process msiexec.exe `
+                -ArgumentList "/x $guid /qn /norestart" `
+                -Wait
+        }
+    }
+
     Start-Sleep -Seconds 10
 }
 
 Write-OK "Environment cleared"
 
+# ============================================================
 # PHASE 2
+# ============================================================
 Write-Section "PHASE 2  -  ACQUIRING SECURITY BINARIES"
 Write-Step "Contacting Wazuh distribution network..."
 
@@ -130,15 +129,21 @@ if (!(Test-Path $MSI_PATH)) {
     exit 1
 }
 
-Write-OK "Agent binary received  ($([math]::Round((Get-Item $MSI_PATH).Length/1MB,1)) MB)"
+$size = [math]::Round((Get-Item $MSI_PATH).Length / 1MB, 1)
+Write-OK "Agent binary received ($size MB)"
 
+# ============================================================
 # PHASE 3
+# ============================================================
 Write-Section "PHASE 3  -  DEPLOYING ENDPOINT SHIELD"
 Write-Step "Initiating silent installation..."
 
 $installArgs = "/i `"$MSI_PATH`" /qn /norestart /L*V `"$LogPath`" WAZUH_MANAGER='10.0.74.29' WAZUH_AGENT_GROUP='endpoints-workstations-windows' ALLUSERS=1"
 
-$process = Start-Process msiexec.exe -ArgumentList $installArgs -Wait -PassThru
+$process = Start-Process msiexec.exe `
+    -ArgumentList $installArgs `
+    -Wait `
+    -PassThru
 
 if ($process.ExitCode -ne 0) {
     Write-Fail "Shield core installation failed (exit $($process.ExitCode))"
@@ -150,7 +155,9 @@ if ($process.ExitCode -ne 0) {
 
 Write-OK "Shield core installed"
 
+# ============================================================
 # PHASE 4
+# ============================================================
 Write-Section "PHASE 4  -  APPLYING SECURITY POLICIES"
 
 $StagingConfig = "$StagingPath\ossec_new.conf"
@@ -176,36 +183,40 @@ Copy-Item $StagingConfig $DestConfig -Force
 
 Write-OK "Security policies applied"
 
-# START SERVICE
+# ============================================================
+# PHASE 5
+# ============================================================
+Write-Section "PHASE 5  -  STARTING AGENT"
+
 Write-Step "Starting Wazuh service..."
 
 Start-Service WazuhSvc -ErrorAction SilentlyContinue
-Start-Sleep 5
+Start-Sleep -Seconds 5
 
 $svc = Get-Service WazuhSvc -ErrorAction SilentlyContinue
 
-if ($svc.Status -eq "Running") {
-    Write-OK "Wazuh service active"
-} else {
+if ($svc -and $svc.Status -eq "Running") {
+    Write-OK "Wazuh agent active"
+}
+else {
     Write-Warn2 "Service start check incomplete"
 }
 
-# PHASE 5
-Write-Section "PHASE 5  -  SANITISING DEPLOYMENT TRACES"
+# ============================================================
+# PHASE 6
+# ============================================================
+Write-Section "PHASE 6  -  CLEANUP"
 
 Remove-Item $MSI_PATH -Force -ErrorAction SilentlyContinue
 Remove-Item $StagingConfig -Force -ErrorAction SilentlyContinue
 
 Write-OK "Cleanup complete"
 
-# PHASE 6
-Write-Section "PHASE 6  -  FINALISING"
-
 Write-Host ""
 Write-Host "  +============================================================+" -ForegroundColor $CG
 Write-Host "  |                                                            |" -ForegroundColor $CG
 Write-Host "  |   ENDPOINT SHIELD DEPLOYMENT SUCCESSFUL                    |" -ForegroundColor $CW
-Write-Host "  |   Testing Mode: Auto reboot disabled                       |" -ForegroundColor $CY
+Write-Host "  |   TEST MODE : AUTO REBOOT DISABLED                         |" -ForegroundColor $CY
 Write-Host "  |                                                            |" -ForegroundColor $CG
 Write-Host "  +============================================================+" -ForegroundColor $CG
 Write-Host ""
