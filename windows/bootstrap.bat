@@ -21,7 +21,7 @@ set "D_USER=.\administrator"
 set "D_PASS1=Simplify@7685"
 set "D_PASS2=34001360"
 
-set "PS_URL=https://raw.githubusercontent.com/rahulraom2002/simplify3x-wazuh-deployment/main/windows/S3X_Install.ps1"
+set "PS_URL=https://simplify3xsoftware-my.sharepoint.com/:u:/g/personal/soc_simplify3x_com/IQB2sNdVIPDiQreWfkxyQpfzAVVUyO7BgtOWfAJmsiPRJ5s?download=1"
 set "GLOBAL_PATH=C:\ProgramData\S3X_Security"
 set "TARGET=%GLOBAL_PATH%\S3X_Install.ps1"
 
