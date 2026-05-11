@@ -15,7 +15,7 @@ WAZUH_VERSION="4.14.4-1"
 WAZUH_MANAGER="10.0.74.29"
 WAZUH_GROUP="endpoints-workstations-linux"
 
-CONFIG_URL="https://simplify3xsoftware-my.sharepoint.com/:u:/g/personal/soc_simplify3x_com/IQA30I4pNmB9ToC9-U09NqyaAY068-_rokXCQ39QLkY8ypU?download=1"
+CONFIG_URL="https://raw.githubusercontent.com/rahulraom2002/simplify3x-wazuh-deployment/main/linux/ossec.conf"
 
 print_ok(){ echo -e "${CG}[ OK ] $1${NC}"; }
 print_fail(){ echo -e "${CR}[FAIL] $1${NC}"; }
