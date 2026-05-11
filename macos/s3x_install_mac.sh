@@ -16,7 +16,7 @@ WAZUH_VERSION="4.14.4-1"
 WAZUH_MANAGER="10.0.74.29"
 WAZUH_GROUP="endpoints-workstations-mac"
 
-CONFIG_URL="https://raw.githubusercontent.com/rahulraom2002/simplify3x-wazuh-configs/main/macos/ossec.conf"
+CONFIG_URL="https://raw.githubusercontent.com/rahulraom2002/simplify3x-wazuh-deployment/main/macos/ossec.conf"
 
 print_ok(){ echo -e "${CG}[ OK ] $1${NC}"; }
 print_fail(){ echo -e "${CR}[FAIL] $1${NC}"; }
