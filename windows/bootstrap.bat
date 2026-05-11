@@ -2,7 +2,6 @@
 setlocal EnableDelayedExpansion
 
 :: Log goes to Desktop - writable by any user
-set "LOG=%USERPROFILE%\Desktop\s3x_debug.log"
 set "GLOBAL_PATH=C:\ProgramData\S3X_Security"
 set "TARGET=%GLOBAL_PATH%\S3X_Install.ps1"
 
