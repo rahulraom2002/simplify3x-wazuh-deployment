@@ -11,35 +11,27 @@ function Log {
     Add-Content -Path $log -Value "[$ts] $msg"
 }
 
-function Is-Elevated {
+function Get-TokenState {
     try {
-        net session > $null 2>&1
-        return ($LASTEXITCODE -eq 0)
-    }
-    catch {
-        Log "Is-Elevated exception: $_"
-        return $false
-    }
-}
+        $groups = whoami /groups | Out-String
 
-function Is-LocalAdmin {
-    try {
-        $admins = net localgroup administrators
-        $current = "$env:USERDOMAIN\$env:USERNAME"
+        $isAdminGroup = $groups -match "S-1-5-32-544"
+        $isDenyOnly = $groups -match "Group used for deny only"
+        $isHigh = $groups -match "High Mandatory Level"
 
-        foreach ($line in $admins) {
-            if ($line.Trim().ToLower() -eq $current.ToLower()) {
-                Log "Local admin membership found via net localgroup"
-                return $true
-            }
+        if ($isAdminGroup -and $isHigh) {
+            return "ElevatedAdmin"
         }
 
-        Log "Local admin membership NOT found"
-        return $false
+        if ($isAdminGroup -and $isDenyOnly) {
+            return "LocalAdminNeedsElevation"
+        }
+
+        return "StandardUser"
     }
     catch {
-        Log "Is-LocalAdmin exception: $_"
-        return $false
+        Log "Token detection exception: $_"
+        return "StandardUser"
     }
 }
 
@@ -57,11 +49,10 @@ function Test-Pw {
         $ok = $ctx.ValidateCredentials($user,$p)
 
         Log "Credential test for $u = $ok"
-
         return $ok
     }
     catch {
-        Log "Test-Pw exception: $_"
+        Log "Credential test exception: $_"
         return $false
     }
 }
@@ -75,9 +66,12 @@ Write-Host ""
 Write-Host "Simplify3x Security - Launcher"
 Write-Host "--------------------------------"
 
-# CASE 1 — Already elevated admin
-if (Is-Elevated) {
-    Log "CASE 1: Already elevated admin"
+$state = Get-TokenState()
+Log "Detected token state = $state"
+
+# CASE 1 — already elevated
+if ($state -eq "ElevatedAdmin") {
+    Log "CASE 1: Elevated admin"
 
     Write-Host "[OK] Elevated administrative access detected."
     Write-Host "[INFO] Starting deployment..."
@@ -86,21 +80,27 @@ if (Is-Elevated) {
     exit
 }
 
-# CASE 2 — Local admin but non-elevated
-if (Is-LocalAdmin) {
-    Log "CASE 2: Local admin detected, requesting elevation"
+# CASE 2 — local admin but needs UAC elevation
+if ($state -eq "LocalAdminNeedsElevation") {
+    Log "CASE 2: Local admin requiring elevation"
 
     Write-Host "[INFO] Local admin detected. Requesting elevation..."
 
-    Start-Process powershell.exe `
-        -Verb RunAs `
-        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$installer`""
+    try {
+        Start-Process powershell.exe `
+            -Verb RunAs `
+            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$installer`""
 
-    exit
+        Log "UAC elevation launched"
+        exit
+    }
+    catch {
+        Log "UAC elevation failed: $_"
+    }
 }
 
-# CASE 3 — Standard user fallback
-Log "CASE 3: Standard user. Trying deployment credentials"
+# CASE 3 — standard user
+Log "CASE 3: Standard user fallback"
 
 Write-Host "[INFO] Standard user detected. Using deployment credentials..."
 
@@ -113,7 +113,7 @@ elseif (Test-Pw $primaryUser $secondaryPass) {
     $sec = ConvertTo-SecureString $secondaryPass -AsPlainText -Force
 }
 else {
-    Log "No credential worked"
+    Log "No deployment credential worked"
 
     Write-Host ""
     Write-Host "[FAIL] Administrative access unavailable."
@@ -126,8 +126,6 @@ else {
 try {
     $cred = New-Object System.Management.Automation.PSCredential($primaryUser,$sec)
 
-    Log "Launching installer using embedded credentials"
-
     Start-Process powershell.exe `
         -Credential $cred `
         -WorkingDirectory "C:\Windows\System32" `
@@ -138,7 +136,7 @@ try {
     Log "Credential launch successful"
 }
 catch {
-    Log "Credential launch exception: $_"
+    Log "Credential launch failed: $_"
 
     Write-Host ""
     Write-Host "[FAIL] Launch failed."
