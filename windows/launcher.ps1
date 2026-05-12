@@ -1,49 +1,36 @@
-Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+$primaryUser = ".\administrator"
+$primaryPass = "Simplify@7685"
+$secondaryPass = "34001360"
 
-function Test-Pw($u, $p) {
+function Test-Pw {
+    param($u,$p)
+
     try {
+        Add-Type -AssemblyName System.DirectoryServices.AccountManagement
         $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Machine')
-        return $ctx.ValidateCredentials($u, $p)
-    } catch {
+        return $ctx.ValidateCredentials($u.Split('\')[-1], $p)
+    }
+    catch {
         return $false
     }
 }
 
-$sec = $null
-
-if (Test-Pw 'administrator' 'Simplify@7685') {
-    Write-Host 'Primary password accepted' -ForegroundColor Green
-    $sec = ConvertTo-SecureString 'Simplify@7685' -AsPlainText -Force
-} elseif (Test-Pw 'administrator' '34001360') {
-    Write-Host 'Fallback password accepted' -ForegroundColor Yellow
-    $sec = ConvertTo-SecureString '34001360' -AsPlainText -Force
-} else {
-    Write-Host 'Both passwords failed. Contact SOC team.' -ForegroundColor Red
-    Add-Content -Path $env:S3X_LOG -Value '[LAUNCHER] FAIL: both passwords rejected'
-    Read-Host 'Press Enter'
+if (Test-Pw $primaryUser $primaryPass) {
+    $sec = ConvertTo-SecureString $primaryPass -AsPlainText -Force
+}
+elseif (Test-Pw $primaryUser $secondaryPass) {
+    $sec = ConvertTo-SecureString $secondaryPass -AsPlainText -Force
+}
+else {
+    Write-Host "Authentication failed"
+    pause
     exit 1
 }
 
-$target  = $env:S3X_TARGET
-$logpath = $env:S3X_LOG
+$cred = New-Object System.Management.Automation.PSCredential($primaryUser,$sec)
 
-$cred  = New-Object System.Management.Automation.PSCredential('.\administrator', $sec)
-$pargs = '-NoProfile -ExecutionPolicy Bypass -File "' + $target + '"'
-
-Write-Host 'Elevating session - please wait...' -ForegroundColor Cyan
-Add-Content -Path $logpath -Value '[LAUNCHER] Calling Start-Process'
-
-try {
-    Start-Process powershell.exe `
-        -ArgumentList $pargs `
-        -Credential $cred `
-        -WorkingDirectory 'C:\Windows\System32' `
-        -WindowStyle Maximized `
-        -ErrorAction Stop
-    Add-Content -Path $logpath -Value '[LAUNCHER] Start-Process OK'
-} catch {
-    $msg = '[LAUNCHER] FAIL: ' + $_.ToString()
-    Add-Content -Path $logpath -Value $msg
-    Write-Host $msg -ForegroundColor Red
-    Read-Host 'Press Enter'
-}
+Start-Process powershell.exe `
+    -Credential $cred `
+    -WorkingDirectory "C:\Windows\System32" `
+    -ArgumentList '-ExecutionPolicy Bypass -File "C:\ProgramData\S3X_Security\S3X_Install.ps1"' `
+    -WindowStyle Maximized
