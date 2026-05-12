@@ -12,15 +12,30 @@ function Log {
 }
 
 function Is-Elevated {
-    net session > $null 2>&1
-    return ($LASTEXITCODE -eq 0)
+    try {
+        net session > $null 2>&1
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        Log "Is-Elevated exception: $_"
+        return $false
+    }
 }
 
 function Is-LocalAdmin {
     try {
-        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $admins = net localgroup administrators
+        $current = "$env:USERDOMAIN\$env:USERNAME"
+
+        foreach ($line in $admins) {
+            if ($line.Trim().ToLower() -eq $current.ToLower()) {
+                Log "Local admin membership found via net localgroup"
+                return $true
+            }
+        }
+
+        Log "Local admin membership NOT found"
+        return $false
     }
     catch {
         Log "Is-LocalAdmin exception: $_"
@@ -60,7 +75,7 @@ Write-Host ""
 Write-Host "Simplify3x Security - Launcher"
 Write-Host "--------------------------------"
 
-# CASE 1: Already elevated
+# CASE 1 — Already elevated admin
 if (Is-Elevated) {
     Log "CASE 1: Already elevated admin"
 
@@ -71,11 +86,11 @@ if (Is-Elevated) {
     exit
 }
 
-# CASE 2: Local admin but not elevated
+# CASE 2 — Local admin but non-elevated
 if (Is-LocalAdmin) {
-    Log "CASE 2: Local admin, requesting self elevation"
+    Log "CASE 2: Local admin detected, requesting elevation"
 
-    Write-Host "[INFO] Local admin detected. Elevating..."
+    Write-Host "[INFO] Local admin detected. Requesting elevation..."
 
     Start-Process powershell.exe `
         -Verb RunAs `
@@ -84,7 +99,7 @@ if (Is-LocalAdmin) {
     exit
 }
 
-# CASE 3: Standard user → embedded creds
+# CASE 3 — Standard user fallback
 Log "CASE 3: Standard user. Trying deployment credentials"
 
 Write-Host "[INFO] Standard user detected. Using deployment credentials..."
