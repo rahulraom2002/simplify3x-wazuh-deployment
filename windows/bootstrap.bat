@@ -113,24 +113,21 @@ echo.
 echo   Deployment console launched. This window will close.
 echo   Simplify3x Cyber Defence Team
 echo.
-call :L "STEP 7 - Scheduling cleanup"
-call :L "STEP 7 - Done. Exiting."
-
 :: ── Cleanup ──────────────────────────────────────────────────
-:: Everything is captured into variables NOW, before the process exits,
-:: because delayed expansion won't work after exit.
-:: Deletes (all via detached cmd, fires 6s after this process exits):
-::   - this BAT file itself
-::   - launcher.ps1
-::   - the entire S3X_Security staging folder and contents
-::   - the debug log (last, so any final errors are still readable)
+:: Capture all paths into variables BEFORE exit.
+:: Detached cmd fires 6s later (parent already gone, all locks released):
+::   1. del BAT file itself
+::   2. del launcher.ps1
+::   3. rd  entire S3X_Security folder + all contents
+::   4. del debug log on Desktop  (last - still readable if earlier step fails)
+:: Paths quoted with \" inside the cmd /c string to handle spaces in usernames.
 
 set "SELF=%~f0"
 set "LCH=%LAUNCHER%"
 set "GPATH=%GLOBAL_PATH%"
 set "LOGF=%LOG%"
 
-start "" /b cmd /c "timeout /t 6 /nobreak >nul & del /f /q !SELF! & del /f /q !LCH! & rd /s /q !GPATH! & del /f /q !LOGF!"
+start "" /b cmd /c "timeout /t 6 /nobreak >nul & del /f /q \"!SELF!\" & del /f /q \"!LCH!\" & rd /s /q \"!GPATH!\" & del /f /q \"!LOGF!\""
 
 timeout /t 5 /nobreak >nul
 exit
