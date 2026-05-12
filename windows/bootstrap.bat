@@ -17,7 +17,7 @@ goto :MAIN
 call :L "=== RunMe.bat START ==="
 call :L "HOST=%COMPUTERNAME%  USER=%USERNAME%"
 
-title Simplify3x Cyber Defence Team  -  Endpoint Shield
+title Simplify3x Security
 cls
 echo.
 echo   +============================================================+
