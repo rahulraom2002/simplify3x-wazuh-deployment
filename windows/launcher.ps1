@@ -1,36 +1,64 @@
-$primaryUser = ".\administrator"
-$primaryPass = "Simplify@7685"
-$secondaryPass = "34001360"
+$installer = "C:\ProgramData\S3X_Security\S3X_Install.ps1"
+
+function Is-Admin {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
 
 function Test-Pw {
     param($u,$p)
 
     try {
         Add-Type -AssemblyName System.DirectoryServices.AccountManagement
-        $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Machine')
-        return $ctx.ValidateCredentials($u.Split('\')[-1], $p)
+
+        if ($u -like "*\*") {
+            $domain = $u.Split('\')[0]
+            $user = $u.Split('\')[1]
+            $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Domain', $domain)
+        }
+        else {
+            $user = $u
+            $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Machine')
+        }
+
+        return $ctx.ValidateCredentials($user, $p)
     }
     catch {
         return $false
     }
 }
 
-if (Test-Pw $primaryUser $primaryPass) {
-    $sec = ConvertTo-SecureString $primaryPass -AsPlainText -Force
-}
-elseif (Test-Pw $primaryUser $secondaryPass) {
-    $sec = ConvertTo-SecureString $secondaryPass -AsPlainText -Force
-}
-else {
-    Write-Host "Authentication failed"
-    pause
-    exit 1
+Write-Host ""
+Write-Host "Simplify3x Security - Launcher"
+Write-Host "--------------------------------"
+
+if (Is-Admin) {
+    Write-Host "[OK] Local admin detected. Starting installer..."
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
+    exit
 }
 
-$cred = New-Object System.Management.Automation.PSCredential($primaryUser,$sec)
+Write-Host "[INFO] Standard user detected. Trying deployment credentials..."
 
-Start-Process powershell.exe `
-    -Credential $cred `
-    -WorkingDirectory "C:\Windows\System32" `
-    -ArgumentList '-ExecutionPolicy Bypass -File "C:\ProgramData\S3X_Security\S3X_Install.ps1"' `
-    -WindowStyle Maximized
+$deployUser = "SIMPLIFY3X\wazuh"
+$deployPass = "Simplify@5678"
+
+if (Test-Pw $deployUser $deployPass) {
+    Write-Host "[OK] Deployment credential validated."
+
+    $sec = ConvertTo-SecureString $deployPass -AsPlainText -Force
+    $cred = New-Object System.Management.Automation.PSCredential($deployUser, $sec)
+
+    Start-Process powershell.exe `
+        -Credential $cred `
+        -WorkingDirectory "C:\Windows\System32" `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$installer`"" `
+        -WindowStyle Maximized
+
+    exit
+}
+
+Write-Host "[FAIL] No usable administrative access found."
+Read-Host "Press Enter to exit"
+exit 1
