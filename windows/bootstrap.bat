@@ -1,10 +1,17 @@
 @echo off
 setlocal EnableDelayedExpansion
 
+:: Force working drive to C to avoid volume-does-not-match error
+C:
+
 set "GLOBAL_PATH=C:\ProgramData\S3X_Security"
 set "TARGET=%GLOBAL_PATH%\S3X_Install.ps1"
 set "LAUNCHER=%GLOBAL_PATH%\launcher.ps1"
-set "LOG=%USERPROFILE%\Desktop\s3x_debug.log"
+:: Log inside staging folder - same drive, always writable, cleaned up at end
+set "LOG=%GLOBAL_PATH%\s3x_debug.log"
+
+:: Create staging dir immediately so log can be written from line 1
+if not exist "%GLOBAL_PATH%" mkdir "%GLOBAL_PATH%" >nul 2>&1
 
 goto :MAIN
 
@@ -16,6 +23,7 @@ goto :MAIN
 :MAIN
 call :L "=== RunMe.bat START ==="
 call :L "HOST=%COMPUTERNAME%  USER=%USERNAME%"
+call :L "Drive forced to C - volume match OK"
 
 title Simplify3x Security
 cls
@@ -40,7 +48,6 @@ set "PS_URL=https://raw.githubusercontent.com/rahulraom2002/simplify3x-wazuh-dep
 call :L "STEP 3 - URL set"
 
 echo   [1/3]  Initialising secure staging area...
-if not exist "%GLOBAL_PATH%" mkdir "%GLOBAL_PATH%" >nul 2>&1
 call :L "STEP 4 - Staging dir ready"
 
 echo   [2/3]  Acquiring deployment modules...
@@ -63,34 +70,34 @@ call :L "STEP 6 - Writing launcher.ps1"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -Path '%LAUNCHER%' -Value '' -Encoding UTF8" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' 'Add-Type -AssemblyName System.DirectoryServices.AccountManagement'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' 'function Test-Pw($u,$p) {'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' 'function Test-Pw(`$u,`$p) {'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    try {'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '        $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext(''Machine'')'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '        return $ctx.ValidateCredentials($u.Split(''\\'')[-1], $p)'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    } catch { return $false }'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '        `$ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext(''Machine'')'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '        return `$ctx.ValidateCredentials(`$u.Split(''\\'')[-1], `$p)'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    } catch { return `$false }'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '}'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '$sec = $null'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' 'if (Test-Pw ''.\administrator'' ''Simplify@7685'') {'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    $sec = ConvertTo-SecureString ''Simplify@7685'' -AsPlainText -Force'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '`$sec = `$null'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' 'if (Test-Pw ''.\\administrator'' ''Simplify@7685'') {'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    `$sec = ConvertTo-SecureString ''Simplify@7685'' -AsPlainText -Force'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Write-Host ''  [ OK ]  Primary verified'' -ForegroundColor Green'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '} elseif (Test-Pw ''.\administrator'' ''34001360'') {'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    $sec = ConvertTo-SecureString ''34001360'' -AsPlainText -Force'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '} elseif (Test-Pw ''.\\administrator'' ''34001360'') {'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    `$sec = ConvertTo-SecureString ''34001360'' -AsPlainText -Force'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Write-Host ''  [ OK ]  Fallback verified'' -ForegroundColor Yellow'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '} else {'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Write-Host ''  [FAIL]  Both passwords rejected'' -ForegroundColor Red'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Write-Host ''  [FAIL]  Both passwords rejected. Contact SOC.'' -ForegroundColor Red'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Read-Host ''Press Enter'''" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    exit 1'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '}'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '$cred = New-Object System.Management.Automation.PSCredential(''.\administrator'', $sec)'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '$pargs = ''-NoProfile -ExecutionPolicy Bypass -File '''''' + ''%TARGET%'' + '''''''" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '`$cred = New-Object System.Management.Automation.PSCredential(''.\\administrator'', `$sec)'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '`$pargs = ''-NoProfile -ExecutionPolicy Bypass -File '''''' + ''%TARGET%'' + '''''''" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' 'Write-Host ''  [  >>  ]  Elevating - please wait...'' -ForegroundColor Cyan'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' 'try {'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Start-Process powershell.exe -ArgumentList $pargs -Credential $cred -WorkingDirectory ''C:\Windows\System32'' -WindowStyle Maximized -ErrorAction Stop'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Start-Process powershell.exe -ArgumentList `$pargs -Credential `$cred -WorkingDirectory ''C:\\Windows\\System32'' -WindowStyle Maximized -ErrorAction Stop'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Add-Content -Path ''%LOG%'' -Value ''[LAUNCHER] Start-Process OK'''" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '} catch {'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    $msg = ''[LAUNCHER] FAIL: '' + $_.ToString()'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Add-Content -Path ''%LOG%'' -Value $msg'" >> "%LOG%" 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Write-Host $msg -ForegroundColor Red'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    `$msg = ''[LAUNCHER] FAIL: '' + `$_.ToString()'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Add-Content -Path ''%LOG%'' -Value `$msg'" >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Write-Host `$msg -ForegroundColor Red'" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '    Read-Host ''Press Enter'''" >> "%LOG%" 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content '%LAUNCHER%' '}'" >> "%LOG%" 2>&1
 
@@ -113,14 +120,7 @@ echo.
 echo   Deployment console launched. This window will close.
 echo   Simplify3x Cyber Defence Team
 echo.
-:: ── Cleanup ──────────────────────────────────────────────────
-:: Capture all paths into variables BEFORE exit.
-:: Detached cmd fires 6s later (parent already gone, all locks released):
-::   1. del BAT file itself
-::   2. del launcher.ps1
-::   3. rd  entire S3X_Security folder + all contents
-::   4. del debug log on Desktop  (last - still readable if earlier step fails)
-:: Paths quoted with \" inside the cmd /c string to handle spaces in usernames.
+call :L "STEP 7 - Scheduling cleanup"
 
 set "SELF=%~f0"
 set "LCH=%LAUNCHER%"
