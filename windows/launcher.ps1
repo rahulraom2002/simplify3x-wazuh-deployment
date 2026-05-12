@@ -11,16 +11,19 @@ function Log {
     Add-Content -Path $log -Value "[$ts] $msg"
 }
 
-function Is-Admin {
+function Is-Elevated {
+    net session > $null 2>&1
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Is-LocalAdmin {
     try {
-        $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
-        $result = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        Log "Is-Admin = $result"
-        return $result
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     }
     catch {
-        Log "Is-Admin exception: $_"
+        Log "Is-LocalAdmin exception: $_"
         return $false
     }
 }
@@ -29,8 +32,6 @@ function Test-Pw {
     param($u,$p)
 
     try {
-        Log "Testing local credential for $u"
-
         Add-Type -AssemblyName System.DirectoryServices.AccountManagement
 
         $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext(
@@ -40,7 +41,7 @@ function Test-Pw {
         $user = $u.Split('\')[-1]
         $ok = $ctx.ValidateCredentials($user,$p)
 
-        Log "Credential result = $ok"
+        Log "Credential test for $u = $ok"
 
         return $ok
     }
@@ -50,7 +51,7 @@ function Test-Pw {
     }
 }
 
-Log "=================================="
+Log "======================================"
 Log "Launcher started"
 Log "User=$env:USERNAME"
 Log "Host=$env:COMPUTERNAME"
@@ -59,18 +60,34 @@ Write-Host ""
 Write-Host "Simplify3x Security - Launcher"
 Write-Host "--------------------------------"
 
-if (Is-Admin) {
-    Log "Current user already admin"
+# CASE 1: Already elevated
+if (Is-Elevated) {
+    Log "CASE 1: Already elevated admin"
 
-    Write-Host "[OK] Local admin detected. Starting installer..."
+    Write-Host "[OK] Elevated administrative access detected."
+    Write-Host "[INFO] Starting deployment..."
 
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
     exit
 }
 
-Log "Current user not admin"
+# CASE 2: Local admin but not elevated
+if (Is-LocalAdmin) {
+    Log "CASE 2: Local admin, requesting self elevation"
 
-Write-Host "[INFO] Standard user detected. Trying deployment credentials..."
+    Write-Host "[INFO] Local admin detected. Elevating..."
+
+    Start-Process powershell.exe `
+        -Verb RunAs `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$installer`""
+
+    exit
+}
+
+# CASE 3: Standard user → embedded creds
+Log "CASE 3: Standard user. Trying deployment credentials"
+
+Write-Host "[INFO] Standard user detected. Using deployment credentials..."
 
 if (Test-Pw $primaryUser $primaryPass) {
     Log "Primary credential valid"
@@ -82,15 +99,19 @@ elseif (Test-Pw $primaryUser $secondaryPass) {
 }
 else {
     Log "No credential worked"
-    Write-Host "Authentication failed"
+
+    Write-Host ""
+    Write-Host "[FAIL] Administrative access unavailable."
+    Write-Host "[FAIL] Deployment credentials rejected."
     Read-Host "Press Enter"
+
     exit 1
 }
 
 try {
     $cred = New-Object System.Management.Automation.PSCredential($primaryUser,$sec)
 
-    Log "Launching elevated installer"
+    Log "Launching installer using embedded credentials"
 
     Start-Process powershell.exe `
         -Credential $cred `
@@ -99,11 +120,13 @@ try {
         -WindowStyle Maximized `
         -ErrorAction Stop
 
-    Log "Start-Process OK"
+    Log "Credential launch successful"
 }
 catch {
-    Log "Start-Process exception: $_"
-    Write-Host "Launch failed"
+    Log "Credential launch exception: $_"
+
+    Write-Host ""
+    Write-Host "[FAIL] Launch failed."
     Read-Host "Press Enter"
     exit 1
 }
