@@ -66,10 +66,10 @@ Write-Host ""
 Write-Host "Simplify3x Security - Launcher"
 Write-Host "--------------------------------"
 
-$state = Get-TokenState()
+$state = Get-TokenState
 Log "Detected token state = $state"
 
-# CASE 1 — already elevated
+# CASE 1
 if ($state -eq "ElevatedAdmin") {
     Log "CASE 1: Elevated admin"
 
@@ -80,9 +80,9 @@ if ($state -eq "ElevatedAdmin") {
     exit
 }
 
-# CASE 2 — local admin but needs UAC elevation
+# CASE 2
 if ($state -eq "LocalAdminNeedsElevation") {
-    Log "CASE 2: Local admin requiring elevation"
+    Log "CASE 2: Local admin requiring UAC elevation"
 
     Write-Host "[INFO] Local admin detected. Requesting elevation..."
 
@@ -99,7 +99,7 @@ if ($state -eq "LocalAdminNeedsElevation") {
     }
 }
 
-# CASE 3 — standard user
+# CASE 3
 Log "CASE 3: Standard user fallback"
 
 Write-Host "[INFO] Standard user detected. Using deployment credentials..."
