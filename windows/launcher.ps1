@@ -1,6 +1,10 @@
 $installer = "C:\ProgramData\S3X_Security\S3X_Install.ps1"
 $log = "C:\ProgramData\S3X_Security\launcher.log"
 
+$primaryUser = ".\administrator"
+$primaryPass = "Simplify@7685"
+$secondaryPass = "34001360"
+
 function Log {
     param($msg)
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -12,7 +16,7 @@ function Is-Admin {
         $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
         $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
         $result = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        Log "Is-Admin result: $result"
+        Log "Is-Admin = $result"
         return $result
     }
     catch {
@@ -25,34 +29,18 @@ function Test-Pw {
     param($u,$p)
 
     try {
-        Log "Testing credential for $u"
+        Log "Testing local credential for $u"
 
         Add-Type -AssemblyName System.DirectoryServices.AccountManagement
 
-        if ($u -like "*\*") {
-            $domain = $u.Split('\')[0]
-            $user = $u.Split('\')[1]
+        $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext(
+            [System.DirectoryServices.AccountManagement.ContextType]::Machine
+        )
 
-            Log "Using domain context: $domain"
-
-            $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext(
-                [System.DirectoryServices.AccountManagement.ContextType]::Domain,
-                $domain
-            )
-        }
-        else {
-            $user = $u
-
-            Log "Using machine context"
-
-            $ctx = New-Object System.DirectoryServices.AccountManagement.PrincipalContext(
-                [System.DirectoryServices.AccountManagement.ContextType]::Machine
-            )
-        }
-
+        $user = $u.Split('\')[-1]
         $ok = $ctx.ValidateCredentials($user,$p)
 
-        Log "Credential validation result: $ok"
+        Log "Credential result = $ok"
 
         return $ok
     }
@@ -62,10 +50,10 @@ function Test-Pw {
     }
 }
 
-Log "==============================="
+Log "=================================="
 Log "Launcher started"
-Log "Current user: $env:USERNAME"
-Log "Computer: $env:COMPUTERNAME"
+Log "User=$env:USERNAME"
+Log "Host=$env:COMPUTERNAME"
 
 Write-Host ""
 Write-Host "Simplify3x Security - Launcher"
@@ -74,58 +62,48 @@ Write-Host "--------------------------------"
 if (Is-Admin) {
     Log "Current user already admin"
 
-    Write-Host "[OK] Admin rights detected. Starting installer..."
+    Write-Host "[OK] Local admin detected. Starting installer..."
 
-    try {
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
-        Log "Installer launched directly"
-        exit
-    }
-    catch {
-        Log "Direct launch exception: $_"
-        Write-Host "[FAIL] Direct launch failed"
-        Read-Host "Press Enter"
-        exit 1
-    }
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
+    exit
 }
 
 Log "Current user not admin"
 
 Write-Host "[INFO] Standard user detected. Trying deployment credentials..."
 
-$deployUser = "SIMPLIFY3X\wazuh"
-$deployPass = "Simplify@5678"
-
-if (Test-Pw $deployUser $deployPass) {
-    Log "Deployment credential validated"
-
-    try {
-        $sec = ConvertTo-SecureString $deployPass -AsPlainText -Force
-        $cred = New-Object System.Management.Automation.PSCredential($deployUser,$sec)
-
-        Log "Launching installer with Start-Process -Credential"
-
-        Start-Process powershell.exe `
-            -Credential $cred `
-            -WorkingDirectory "C:\Windows\System32" `
-            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$installer`"" `
-            -WindowStyle Maximized `
-            -ErrorAction Stop
-
-        Log "Start-Process succeeded"
-
-        exit
-    }
-    catch {
-        Log "Start-Process exception: $_"
-        Write-Host "[FAIL] Launch failed"
-        Read-Host "Press Enter"
-        exit 1
-    }
+if (Test-Pw $primaryUser $primaryPass) {
+    Log "Primary credential valid"
+    $sec = ConvertTo-SecureString $primaryPass -AsPlainText -Force
+}
+elseif (Test-Pw $primaryUser $secondaryPass) {
+    Log "Secondary credential valid"
+    $sec = ConvertTo-SecureString $secondaryPass -AsPlainText -Force
+}
+else {
+    Log "No credential worked"
+    Write-Host "Authentication failed"
+    Read-Host "Press Enter"
+    exit 1
 }
 
-Log "Credential validation failed"
+try {
+    $cred = New-Object System.Management.Automation.PSCredential($primaryUser,$sec)
 
-Write-Host "Authentication failed"
-Read-Host "Press Enter"
-exit 1
+    Log "Launching elevated installer"
+
+    Start-Process powershell.exe `
+        -Credential $cred `
+        -WorkingDirectory "C:\Windows\System32" `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$installer`"" `
+        -WindowStyle Maximized `
+        -ErrorAction Stop
+
+    Log "Start-Process OK"
+}
+catch {
+    Log "Start-Process exception: $_"
+    Write-Host "Launch failed"
+    Read-Host "Press Enter"
+    exit 1
+}
