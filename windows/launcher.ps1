@@ -2,7 +2,7 @@ $installer = "C:\ProgramData\S3X_Security\S3X_Install.ps1"
 $log = "C:\ProgramData\S3X_Security\launcher.log"
 
 $primaryUser = ".\administrator"
-$primaryPass = "Simplify@****"
+$primaryPass = "Simplify@7685"
 $secondaryPass = "34001360"
 
 function Log {
